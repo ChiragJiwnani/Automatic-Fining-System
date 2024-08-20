@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request
+from flask import Flask, redirect, render_template, request
 from werkzeug.utils import secure_filename
 import os
 from ultralytics import YOLO
@@ -8,6 +8,10 @@ import csv
 from util import get_car, read_license_plate
 from sortmaster.sort import *
 import time
+
+import torch
+print(torch.cuda.get_device_name())
+
 
 app = Flask(__name__)
 
@@ -19,6 +23,8 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 mot_tracker = Sort()
 coco_model = YOLO('yolov8n.pt')
 license_plate_detector = YOLO('license_plate_detector.pt')
+coco_model.to('cpu')
+license_plate_detector.to('cpu')
 vehicles = [2, 3, 5, 7]
 frame_skip = 8
 prev_frame = None
@@ -32,7 +38,7 @@ def process_video(video_path):
     frame_skip = 10  
     prev_frame = None
 
-    csv_file = open('license_plate_data_app.csv', 'w', newline='')
+    csv_file = open('app_license_plate.csv', 'w', newline='')
     csv_writer = csv.writer(csv_file)
     csv_writer.writerow(['Car ID', 'License Plate', 'Confidence'])
     cv2.namedWindow("License Plate Detection", cv2.WINDOW_NORMAL)
@@ -78,16 +84,34 @@ def process_video(video_path):
                             cv2.putText(frame, license_plate_text, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (36, 255, 12), 2)
 
 
-                # Display the frame
-                cv2.imshow("License Plate Detection", frame)
-                prev_frame = frame.copy()
-                key = cv2.waitKey(1)
-                if key == ord('q'):
-                    break
+            #     # Display the frame
+                
+            #     cv2.imshow("License Plate Detection", frame)
+            # else:
+            #     # Display the previous frame
+            #     if prev_frame is not None:
+            #         cv2.imshow("License Plate Detection", prev_frame)
+
+            # # Keep track of the previous frame
+            # prev_frame = frame.copy()
+
+            # # Check for the 'q' key press to quit
+            # if cv2.waitKey(1) & 0xFF == ord('q'):
+            #     break
+        ret, buffer = cv2.imencode('.jpg', frame)
+        if not ret:
+            break
+        frame = buffer.tobytes()
+        
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+    # Close the CSV file
+    csv_file.close()
 
     cap.release()
     cv2.destroyAllWindows()
     return csv_file
+    
 
 @app.route('/')
 def index():
@@ -115,7 +139,9 @@ def upload_file():
             csv_writer.writerow(['Car ID', 'License Plate', 'Confidence'])
             csv_writer.writerows(csv_data)
 
-        return 'File uploaded and processed successfully'
+        print ('File uploaded and processed successfully')
+        return redirect('/')  # Redirects to the home page
+        # Redirect to home or a success page after processing
     
     return 'Invalid file format'
 
